@@ -37,7 +37,7 @@ import { initTracing, shutdownTracing } from './tracing';
 import { initErrorTracking, shutdownErrorTracking } from './errorTracking';
 import {
   corsOptions,
-  formatTimeoutError,
+  formatGraphQLError,
   loadSecurityConfig,
   poolTimeoutOptions,
   queryLimitsPlugin,
@@ -74,6 +74,7 @@ const ALLOW_ANONYMOUS_ACCESS = parseAllowAnonymous(process.env['ALLOW_ANONYMOUS_
 const DB_POOL_MAX = parseInt(process.env['DB_POOL_MAX'] ?? '10', 10);
 const DB_POOL_IDLE_TIMEOUT = parseInt(process.env['DB_POOL_IDLE_TIMEOUT'] ?? '10000', 10);
 const DB_POOL_CONNECTION_TIMEOUT = parseInt(process.env['DB_POOL_CONNECTION_TIMEOUT'] ?? '0', 10);
+const SLOW_GRAPHQL_OPERATION_MS = parseInt(process.env['SLOW_GRAPHQL_OPERATION_MS'] ?? '1000', 10);
 
 // Parsed before anything starts, so a bad value is a startup failure rather
 // than a request that behaves differently from what the operator configured.
@@ -174,12 +175,15 @@ async function main() {
     introspection: security.introspection,
     // Database timeouts are reported as a coded, actionable message rather
     // than a generic internal error.
-    formatError: formatTimeoutError,
+    formatError: (formatted, error) => formatGraphQLError(formatted, error),
     persistedQueries,
     plugins: [
       queryLimitsPlugin(security),
       ...(security.introspection ? [] : [ApolloServerPluginLandingPageDisabled()]),
-      metricsPlugin(),
+      metricsPlugin({
+        slowOperationMs: Number.isFinite(SLOW_GRAPHQL_OPERATION_MS) ? SLOW_GRAPHQL_OPERATION_MS : 1000,
+        logger: log,
+      }),
       ApolloServerPluginDrainHttpServer({ httpServer }),
       {
         // Draining the websocket layer on shutdown as well, so a deploy does

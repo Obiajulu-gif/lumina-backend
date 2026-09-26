@@ -239,6 +239,26 @@ export function formatTimeoutError(formatted: GraphQLFormattedError, error: unkn
   };
 }
 
+/** Mask unexpected internal failures in production while preserving safe client errors. */
+export function formatGraphQLError(
+  formatted: GraphQLFormattedError,
+  error: unknown,
+  production = process.env['NODE_ENV'] === 'production'
+): GraphQLFormattedError {
+  const timeout = formatTimeoutError(formatted, error);
+  if (timeout !== formatted) return timeout;
+
+  if (!production) return formatted;
+
+  const code = formatted.extensions?.['code'];
+  if (code !== undefined && code !== 'INTERNAL_SERVER_ERROR') return formatted;
+
+  return {
+    message: 'Internal server error',
+    extensions: { code: 'INTERNAL_SERVER_ERROR' },
+  };
+}
+
 /** Pool options enforcing the statement timeout server-side, with a client-side backstop. */
 export function poolTimeoutOptions(config: Pick<SecurityConfig, 'statementTimeoutMs'>) {
   if (config.statementTimeoutMs <= 0) return {};

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
-import { buildServerHealth, samplePool, serverHealthStatusCode } from './observability';
+import { buildServerHealth, metricsPlugin, samplePool, serverHealthStatusCode } from './observability';
 import { dbPoolErrors, dbPoolIdle, dbPoolTotal, dbPoolWaiting, exportRuns, registry } from './metrics';
 
 const NOW = 1_700_000_000_000;
@@ -93,6 +93,30 @@ test('samplePool publishes the pool counters', async () => {
   assert.equal(await gauge('lumina_db_pool_connections_total'), 10);
   assert.equal(await gauge('lumina_db_pool_connections_idle'), 2);
   assert.equal(await gauge('lumina_db_pool_waiting'), 5);
+});
+
+test('metricsPlugin logs operations slower than the configured threshold', async () => {
+  const warnings: Array<{ fields: Record<string, unknown>; message: string }> = [];
+  const plugin = metricsPlugin({
+    slowOperationMs: 1,
+    logger: {
+      warn: (fields, message) => warnings.push({ fields, message }),
+    },
+  });
+
+  const listener = await plugin.requestDidStart?.({} as never);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  await listener?.willSendResponse?.({
+    operationName: 'Transactions',
+    operation: { operation: 'query' },
+    errors: undefined,
+  } as never);
+
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.message, 'slow graphql operation');
+  assert.equal(warnings[0]?.fields.operation, 'Transactions');
+  assert.equal(warnings[0]?.fields.type, 'query');
+  assert.equal(warnings[0]?.fields.thresholdMs, 1);
 });
 
 test('samplePool tolerates a pool that does not expose counts', async () => {

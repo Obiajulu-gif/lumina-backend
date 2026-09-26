@@ -9,6 +9,7 @@ import {
   assertWithinLimits,
   corsOptions,
   formatTimeoutError,
+  formatGraphQLError,
   isDatabaseTimeout,
   loadSecurityConfig,
   poolTimeoutOptions,
@@ -161,6 +162,29 @@ test('database timeouts are reported with a clear coded error', () => {
   assert.match(out.message, /took too long/);
   const untouched = { message: 'x' };
   assert.equal(formatTimeoutError(untouched, new Error('boom')), untouched);
+});
+
+test('production error formatter masks unexpected internal failures only', () => {
+  const masked = formatGraphQLError(
+    {
+      message: 'password auth failed for database user lumina',
+      extensions: { code: 'INTERNAL_SERVER_ERROR', stacktrace: ['secret stack'] },
+    },
+    new Error('password auth failed for database user lumina'),
+    true
+  );
+
+  assert.equal(masked.message, 'Internal server error');
+  assert.deepEqual(masked.extensions, { code: 'INTERNAL_SERVER_ERROR' });
+
+  const clientError = {
+    message: 'Query depth 12 exceeds the maximum allowed depth of 10',
+    extensions: { code: 'QUERY_TOO_DEEP' },
+  };
+  assert.equal(formatGraphQLError(clientError, new GraphQLError('too deep'), true), clientError);
+
+  const developmentError = { message: 'boom', extensions: { code: 'INTERNAL_SERVER_ERROR' } };
+  assert.equal(formatGraphQLError(developmentError, new Error('boom'), false), developmentError);
 });
 
 test('request timeout middleware answers 504 for a slow request and is silent for a fast one', async () => {

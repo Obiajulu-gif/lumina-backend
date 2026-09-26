@@ -103,13 +103,15 @@ export async function getEvents(
   contractIds: string[],
   startLedger: number
 ): Promise<GetEventsResult> {
-  if (contractIds.length === 0) {
+  const uniqueContractIds = [...new Set(contractIds.map(id => id.trim()).filter(Boolean))];
+
+  if (uniqueContractIds.length === 0) {
     return { events: [], latestLedger: startLedger };
   }
 
   const result = await rpcCall<RpcGetEventsResult>(rpcUrl, 'getEvents', {
     startLedger,
-    filters: [{ type: 'contract', contractIds }],
+    filters: [{ type: 'contract', contractIds: uniqueContractIds }],
     pagination: { limit: 200 },
   });
 

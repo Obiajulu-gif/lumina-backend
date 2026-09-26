@@ -32,7 +32,6 @@
 
 import {
   createPool,
-  ensurePartitions,
   getLatestIndexedEventLedger,
   getLatestIndexedLedger,
   indexLedger,
@@ -49,7 +48,6 @@ import {
   ledgerIndexDuration,
   recordHorizonTip,
   recordIndexedLedger,
-  lastSuccessfulRegistryDiscoveryTimestamp,
 } from './metrics';
 import { aggregateNetworkStates, startHealthServer, type NetworkState } from './health';
 import { initTracing, shutdownTracing } from './tracing';
@@ -236,22 +234,19 @@ export async function fetchAndIndexLedgerWithRetry(
   retryAttempts = LEDGER_RETRY_ATTEMPTS,
   retryBaseMs = LEDGER_RETRY_BASE_MS
 ): Promise<boolean> {
-  if (!config) throw new Error('Configuration not loaded');
-  const actualRetryAttempts = retryAttempts ?? config.ledgerRetryAttempts;
-  const actualRetryBaseMs = retryBaseMs ?? config.ledgerRetryBaseMs;
-  for (let attempt = 1; attempt <= actualRetryAttempts; attempt++) {
+  for (let attempt = 1; attempt <= retryAttempts; attempt++) {
     try {
       await indexOne(sequence);
       return true;
     } catch (err) {
-      if (attempt === actualRetryAttempts) {
+      if (attempt === retryAttempts) {
         indexingErrors.inc({ loop: 'ledger' });
         log.error({ ledger: sequence, attempts: attempt, err: message(err) }, 'giving up on ledger');
         return false;
       }
-      const delay = actualRetryBaseMs * 2 ** (attempt - 1);
+      const delay = retryBaseMs * 2 ** (attempt - 1);
       log.warn(
-        { ledger: sequence, attempt, maxAttempts: actualRetryAttempts, retryInMs: delay, err: message(err) },
+        { ledger: sequence, attempt, maxAttempts: retryAttempts, retryInMs: delay, err: message(err) },
         'ledger failed, retrying'
       );
       await new Promise(r => setTimeout(r, delay));
@@ -434,7 +429,7 @@ async function runNetworkLoop(loop: NetworkLoop, isPrimary: boolean): Promise<vo
     }
 
     if (isShuttingDown) break;
-    await new Promise(r => setTimeout(r, config!.pollIntervalMs));
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
   }
 }
 
@@ -512,3 +507,13 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** Never log a database URL with its password in it. */
+function redactUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) parsed.password = '***';
+    return parsed.toString();
+  } catch {
+    return '(unparseable)';
+  }
+}

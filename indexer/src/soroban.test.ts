@@ -58,6 +58,26 @@ test('getEvents decodes ScVal topics and values from a real RPC response shape',
   assert.deepEqual(events[0].value, { amount: '1000' });
 });
 
+test('getEvents deduplicates and trims contract IDs before calling RPC', async () => {
+  let sentContractIds: string[] = [];
+  (global as unknown as { fetch: typeof fetch }).fetch = (async (_url: unknown, init?: RequestInit) => {
+    const request = JSON.parse(String(init?.body));
+    sentContractIds = request.params.filters[0].contractIds;
+    return {
+      ok: true,
+      json: async () => ({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { latestLedger: 105, events: [] },
+      }),
+    } as Response;
+  }) as typeof fetch;
+
+  await getEvents('https://rpc.example.com', [' CABC ', 'CABC', '', 'CDEF'], 100);
+
+  assert.deepEqual(sentContractIds, ['CABC', 'CDEF']);
+});
+
 test('getEvents returns [] events (but a real latestLedger) when the RPC result has none', async () => {
   mockFetchOnce({ jsonrpc: '2.0', id: 1, result: { latestLedger: 105 } });
   const { events, latestLedger } = await getEvents('https://rpc.example.com', ['CABC'], 100);

@@ -19,8 +19,15 @@ import {
 } from './metrics';
 import type { Context } from './resolvers';
 
+interface OperationMetricsOptions {
+  slowOperationMs?: number;
+  logger?: {
+    warn: (fields: Record<string, unknown>, message: string) => void;
+  };
+}
+
 /** Records counts and latency per operation name. */
-export function metricsPlugin(): ApolloServerPlugin<Context> {
+export function metricsPlugin(options: OperationMetricsOptions = {}): ApolloServerPlugin<Context> {
   return {
     async requestDidStart(): Promise<GraphQLRequestListener<Context>> {
       const start = process.hrtime.bigint();
@@ -37,6 +44,21 @@ export function metricsPlugin(): ApolloServerPlugin<Context> {
           const seconds = Number(process.hrtime.bigint() - start) / 1e9;
           graphqlOperationDuration.observe({ operation, type }, seconds);
           graphqlOperations.inc({ operation, type, outcome: failed ? 'error' : 'ok' });
+
+          const slowOperationMs = options.slowOperationMs ?? 0;
+          const durationMs = seconds * 1000;
+          if (slowOperationMs > 0 && durationMs >= slowOperationMs) {
+            options.logger?.warn(
+              {
+                operation,
+                type,
+                durationMs: Math.round(durationMs),
+                thresholdMs: slowOperationMs,
+                failed,
+              },
+              'slow graphql operation'
+            );
+          }
         },
       };
     },
